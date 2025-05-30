@@ -1,0 +1,26 @@
+# Binários gerados
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+
+# Pastas de build
+/build/
+/bin/
+/dist/
+
+# Arquivos de teste gerados
+*.out
+
+# Diretório do IDE/editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.env
+
+# Arquivos do sistema
+.DS_Store
+Thumbs.db
