@@ -1,9 +1,11 @@
 package controllers
 
 import (
-	"fmt"
 	"go-api/internal/models"
+	"log"
+	"math"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -37,7 +39,6 @@ func (uc *UserController) GetUser(c *gin.Context) {
 	c.JSON(http.StatusOK, user)
 
 }
-
 func (uc *UserController) GetAllUsers(c *gin.Context) {
 	var users []models.User
 	result := uc.db.Find(&users) // Busca todos os usuários no banco de dados
@@ -49,44 +50,85 @@ func (uc *UserController) GetAllUsers(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, users)
 }
+func (uc *UserController) GetAllUsersPaginated(c *gin.Context) {
+	// Step 1: Obter parâmetros de paginação (com valores padrão)
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))    // Pega o parâmetro "page" da URL, com valor padrão 1
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10")) // Pega o parâmetro "limit" da URL, com valor padrão 10
 
-// Recebe um JSON no corpo da requisição, faz o bind para a struct User e responde com o mesmo JSON.
-// BindJSON lê o corpo da requisição e preenche a struct automaticamente.
+	offset := (page - 1) * limit // Cálculo do offset para a consulta
+	var users []models.User
+	var total int64
+
+	uc.db.Model(&models.User{}).Count(&total)                // Conta o total de usuários no banco de dados
+	result := uc.db.Offset(offset).Limit(limit).Find(&users) // Busca os usuários com offset e limite
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Erro ao buscar usuários",
+		})
+		return
+	}
+
+	totalPages := int(math.Ceil(float64(total) / float64(limit))) // Calcula o total de páginas
+	c.JSON(http.StatusOK, models.UserPagination{
+		Data:       users,
+		Total:      total,
+		Page:       page,
+		Limit:      limit,
+		TotalPages: totalPages,
+	})
+}
 func (uc *UserController) CreateUser(c *gin.Context) {
+	var createUserRequest models.CreateUserRequest
+
+	if err := c.ShouldBindJSON(&createUserRequest); err != nil {
+		log.Printf("Erro no bind JSON: %v\n", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos!"})
+		return
+	}
+
+	user := models.User{
+		Login:       createUserRequest.Login,
+		Name:        createUserRequest.Name,
+		Email:       createUserRequest.Email,
+		Password:    createUserRequest.Password,
+		FullName:    createUserRequest.FullName,
+		Active:      createUserRequest.Active,
+		PhoneNumber: createUserRequest.PhoneNumber,
+	}
+
+	if err := uc.db.Create(&user).Error; err != nil {
+		log.Printf("Erro ao criar usuário: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar usuário"})
+		return
+	}
+	user.Password = ""
+	c.JSON(http.StatusCreated, user)
+}
+func (uc *UserController) UpdateUser(c *gin.Context) {
+	id := c.Param("id")
+	var updateUserRequest models.UpdateUserRequest
 	var user models.User
 
-	// Tenta fazer o bind do JSON da requisição para a struct User
-	// ShouldBindJson só preenche os campos que existem na struct. Qualquer campo extra no JSON será ignorado silenciosamente.
-	// Tipos invaliados também vai gerar erro.
-
-	//1) Forma de tratar erro (COMPACTA)
-	// if err := algumaFuncao(); err != nil { --> Faça isso, se der erro, faça isso!
-	// 	// Trate o erro aqui
-	// }
-
-	//2) Forma de tratar erro (NÃO COMPACTA)
-	// err := algumaFuncao()
-	// if err != nil {
-	// 	fmt.Println("Erro:", err)
-	// 	return
-	// }
-
-	if err := c.ShouldBindJSON(&user); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "JSON inválido"})
-		return
-	}
-	//Validações
-	// fmt.Println(user.Email == nil) --> Isso não funciona, pois o campo Email é uma string, e tipos primitivos não podem ser nulos.
-	// Tipos básicos como string, int, etc., têm valores zero:
-	// 	string → "" (string vazia)
-	// 	int → 0
-	// 	bool → false
-
-	fmt.Println("Email recebido:", user.Email)
-	if user.Email == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Email é obrigatório"})
+	if err := c.ShouldBindJSON(&updateUserRequest); err != nil {
+		log.Printf("Erro no bind JSON: %v\n", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos!"})
 		return
 	}
 
-	c.JSON(http.StatusCreated, user)
+	if err := uc.db.First(&user, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Usuário não encontrado!"})
+		return
+	}
+
+	user.Login = updateUserRequest.Login
+	user.Password = updateUserRequest.Password
+
+	if err := uc.db.Save(&user).Error; err != nil {
+		log.Printf("Erro ao atualizar usuário: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar usuário"})
+		return
+	}
+
+	user.Password = ""
+	c.JSON(http.StatusOK, user)
 }
